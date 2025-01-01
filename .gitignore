@@ -12,7 +12,7 @@ dist-ssr
 *.local
 
 .vscode/*
-.vscode/launch.json
+!.vscode/launch.json
 !.vscode/extensions.json
 .idea
 .DS_Store
@@ -22,21 +22,9 @@ dist-ssr
 *.sln
 *.sw?
 
-/.history
 /.cache
 /build
-.env.local
-.env
-.dev.vars
+.env*
 *.vars
 .wrangler
 _worker.bundle
-
-Modelfile
-modelfiles
-
-# docs ignore
-site
-
-# commit file ignore
-app/commit.json
