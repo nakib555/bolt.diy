@@ -1,36 +1,52 @@
 import { BaseProvider } from '~/lib/modules/llm/base-provider';
-import type { ModelInfo } from '~/lib/modules/llm/types'; // Ensure ModelInfo has isPreferred?
+import type { ModelInfo } from '~/lib/modules/llm/types';
 import type { IProviderSetting } from '~/types/model';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModelV1 } from 'ai'; // Assuming this is from @ai-sdk/core or similar
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 
-// Define this at the class level or as a constant
-// Adjust these patterns based on what you consider "preferred" or more cost-effective/free-tier
-const PREFERRED_MODEL_PATTERNS: string[] = [
-  'gemini-1.5-flash', // Models with "flash" are generally more cost-effective
-  // Add other patterns or full names of models you consider "preferred"
-  // e.g., if Google offered a specific 'gemini-free-tier-model'
-];
+// Define a more specific type for the expected model structure from Google's API
+interface GoogleApiModel {
+  name: string;
+  displayName?: string;
+  description?: string;
+  version?: string;
+  inputTokenLimit?: number;
+  outputTokenLimit?: number;
+  supportedGenerationMethods?: string[];
+  // Add other properties if needed
+}
+
+interface GoogleApiModelsResponse {
+  models: GoogleApiModel[];
+  // nextPageToken?: string; // If pagination is handled
+}
 
 export default class GoogleProvider extends BaseProvider {
-  name = 'Google'; // Internal identifier
-  // The label property for ProviderInfo should be used for display if different,
-  // e.g., in the main list of providers you pass to ModelSelector.
-  // For ModelSelector, provider.name from ProviderInfo is displayed.
+  name = 'Google';
   getApiKeyLink = 'https://aistudio.google.com/app/apikey';
 
   config = {
     apiTokenKey: 'GOOGLE_GENERATIVE_AI_API_KEY',
   };
 
-  // Static models serve as a fallback or for offline scenarios.
-  // Keep maxTokenAllowed values realistic or consistent with dynamic fetching logic.
+  // Static models serve as a fallback or for offline use
   staticModels: ModelInfo[] = [
-    { name: 'gemini-2.0-flash-thinking-exp-01-21', label: 'gemini-2.0-flash-thinking-exp-01-21', provider: 'Google', maxTokenAllowed: 1048576, isPreferred: true }, // Typical context for Flash 1.5
-    { name: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro', provider: 'Google', maxTokenAllowed: 1048576, isPreferred: false },    // Typical context for Pro 1.5
-    // Older models, may have smaller context windows or different naming conventions from the API
-    { name: 'gemini-pro', label: 'Gemini 1.0 Pro', provider: 'Google', maxTokenAllowed: 32768, isPreferred: false },
-    { name: 'gemini-pro-vision', label: 'Gemini 1.0 Pro Vision', provider: 'Google', maxTokenAllowed: 16384, isPreferred: false }, // Vision models often have different limits
+    { name: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash (Latest)', provider: 'Google', maxTokenAllowed: 8192 }, // Often total context for static is simplified
+    {
+      name: 'gemini-2.0-flash-thinking-exp-01-21', // Example experimental model
+      label: 'Gemini 2.0 Flash-thinking-exp-01-21',
+      provider: 'Google',
+      maxTokenAllowed: 65536,
+    },
+    { name: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash (Exp)', provider: 'Google', maxTokenAllowed: 8192 },
+    { name: 'gemini-1.5-flash-002', label: 'Gemini 1.5 Flash (002)', provider: 'Google', maxTokenAllowed: 8192 },
+    { name: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash (8B)', provider: 'Google', maxTokenAllowed: 8192 },
+    { name: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro (Latest)', provider: 'Google', maxTokenAllowed: 1048576 }, // Updated to reflect ~1M context
+    { name: 'gemini-1.5-pro-002', label: 'Gemini 1.5 Pro (002)', provider: 'Google', maxTokenAllowed: 1048576 },
+    { name: 'gemini-exp-1206', label: 'Gemini Exp (1206)', provider: 'Google', maxTokenAllowed: 8192 },
+    // It's good practice to keep staticModels somewhat aligned with popular/stable dynamic models
+    // For example, adding a known stable one:
+    { name: 'gemini-pro', label: 'Gemini Pro', provider: 'Google', maxTokenAllowed: 32768 } // (30720 input + 2048 output)
   ];
 
   async getDynamicModels(
@@ -41,128 +57,112 @@ export default class GoogleProvider extends BaseProvider {
     const { apiKey } = this.getProviderBaseUrlAndKey({
       apiKeys,
       providerSettings: settings,
-      serverEnv: serverEnv as any,
-      defaultBaseUrlKey: '', // Google doesn't typically use a custom base URL for this API
+      serverEnv: serverEnv as any, // Cast if necessary, ensure type safety upstream
+      defaultBaseUrlKey: '', // Google GenAI doesn't use a separate base URL for model listing in this SDK path
       defaultApiTokenKey: this.config.apiTokenKey,
     });
 
     if (!apiKey) {
-      console.warn(`Missing API Key for ${this.name}. Falling back to static models.`);
-      // Mark static models with isPreferred based on patterns
-      return this.staticModels.map(m => ({
-        ...m,
-        isPreferred: PREFERRED_MODEL_PATTERNS.some(pattern => m.name.includes(pattern)) || m.isPreferred,
-      })).sort(this.sortModels);
+      console.warn(`Missing API Key for ${this.name} provider. Falling back to static models.`);
+      return this.staticModels;
     }
 
     try {
+      // Note: The official Google AI SDK might have its own methods to list models,
+      // but direct fetch is also common if the SDK doesn't expose it or for more control.
+      // This endpoint is for the Generative Language API (used by Gemini API / Google AI Studio).
+      // Vertex AI has a different model listing mechanism.
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+        method: 'GET',
         headers: {
-          ['Content-Type']: 'application/json',
+          'Content-Type': 'application/json',
         },
       });
 
       if (!response.ok) {
-        const errorBody = await response.text().catch(() => 'Could not read error body');
-        console.error(`Error fetching dynamic models from ${this.name}: ${response.status} ${response.statusText}. Body: ${errorBody}`);
-        return this.staticModels.map(m => ({
-             ...m,
-             isPreferred: PREFERRED_MODEL_PATTERNS.some(pattern => m.name.includes(pattern)) || m.isPreferred,
-        })).sort(this.sortModels);
+        const errorBody = await response.text();
+        console.error(
+          `Error fetching dynamic models from ${this.name}: ${response.status} ${response.statusText}. Body: ${errorBody}`,
+        );
+        console.warn(`Falling back to static models for ${this.name}.`);
+        return this.staticModels;
       }
 
-      const res = (await response.json()) as { models?: any[] };
+      const res = (await response.json()) as GoogleApiModelsResponse;
 
       if (!res || !Array.isArray(res.models)) {
-        console.error(`Unexpected response structure from ${this.name} model API:`, res);
-        return this.staticModels.map(m => ({
-             ...m,
-             isPreferred: PREFERRED_MODEL_PATTERNS.some(pattern => m.name.includes(pattern)) || m.isPreferred,
-        })).sort(this.sortModels);
+        console.error(`Unexpected response structure from ${this.name} model API.`);
+        console.warn(`Falling back to static models for ${this.name}.`);
+        return this.staticModels;
       }
 
-      const allDynamicModels: ModelInfo[] = res.models
-        .filter(m => m.name && m.displayName) // Ensure basic fields are present
-        .map((m: any) => {
-          const modelName = m.name.replace(/^models\//, ''); // Remove 'models/' prefix
-          const isPreferred = PREFERRED_MODEL_PATTERNS.some(pattern => modelName.includes(pattern));
+      // Filter for models that support content generation and have necessary details
+      const generativeModels = res.models.filter(
+        (model: GoogleApiModel) =>
+          model.name && // Ensure model has a name
+          model.supportedGenerationMethods &&
+          model.supportedGenerationMethods.includes('generateContent') && // Key filter for LLMs
+          (model.inputTokenLimit || 0) > 0 && // Ensure it can take input
+          (model.outputTokenLimit || 0) > 0    // Ensure it can produce output
+      );
 
-          // Determine token limits, Google's API can be inconsistent here.
-          // Prefer inputTokenLimit + outputTokenLimit if available.
-          let totalTokenLimit = 0;
-          if (typeof m.inputTokenLimit === 'number' && typeof m.outputTokenLimit === 'number') {
-            totalTokenLimit = m.inputTokenLimit + m.outputTokenLimit;
-          } else if (typeof m.tokenLimit === 'number') { // Fallback for older/some models
-            totalTokenLimit = m.tokenLimit;
-          }
+      if (generativeModels.length === 0) {
+        console.warn(`No dynamic generative models found for ${this.name} after filtering. Falling back to static models.`);
+        return this.staticModels;
+      }
 
-          // If still zero, try to find in static or use a default (e.g., 8192).
-          // The displayName can also be less user-friendly, so static label might be better.
-          const staticMatch = this.staticModels.find(sm => sm.name === modelName);
-          if (totalTokenLimit === 0) {
-            totalTokenLimit = staticMatch?.maxTokenAllowed || 8192; // Sensible default
-          }
-          const label = staticMatch?.label || `${m.displayName} (${modelName.split('/').pop()})`; // Prefer static label or construct a decent one
+      return generativeModels.map((m: GoogleApiModel) => {
+        const inputTokens = m.inputTokenLimit || 0;
+        const outputTokens = m.outputTokenLimit || 0;
+        const totalContext = inputTokens + outputTokens;
+        const contextK = Math.floor(totalContext / 1000);
 
-          return {
-            name: modelName,
-            label: `${label} - context ${Math.floor(totalTokenLimit / 1000)}k`,
-            provider: this.name,
-            maxTokenAllowed: totalTokenLimit,
-            isPreferred: isPreferred,
-          };
-        });
-
-      // Sort models: preferred first, then by label
-      allDynamicModels.sort(this.sortModels);
-
-      return allDynamicModels;
-
-    } catch (error) {
-      console.error(`Failed to fetch or process dynamic models for ${this.name}:`, error);
-      return this.staticModels.map(m => ({
-        ...m,
-        isPreferred: PREFERRED_MODEL_PATTERNS.some(pattern => m.name.includes(pattern)) || m.isPreferred,
-      })).sort(this.sortModels);
+        return {
+          name: m.name.replace('models/', ''), // Strip 'models/' prefix for use with SDK
+          label: `${m.displayName || m.name.replace('models/', '')}${contextK > 0 ? ` - ${contextK}k context` : ''}`,
+          provider: this.name,
+          maxTokenAllowed: totalContext || 8192, // Fallback if totalContext is 0
+          // You could add more properties from 'm' if your ModelInfo type supports them
+          // e.g., description: m.description,
+        };
+      });
+    } catch (error)
+    {
+      console.error(`Network or unexpected error in getDynamicModels for ${this.name}:`, error);
+      console.warn(`Falling back to static models for ${this.name}.`);
+      return this.staticModels;
     }
   }
 
-  private sortModels(a: ModelInfo, b: ModelInfo): number {
-    if (a.isPreferred && !b.isPreferred) return -1;
-    if (!a.isPreferred && b.isPreferred) return 1;
-    return a.label.localeCompare(b.label);
-  }
-
   getModelInstance(options: {
-    model: string;
+    model: string; // This should be the name like 'gemini-1.5-pro-latest' (without 'models/')
     serverEnv: any;
     apiKeys?: Record<string, string>;
-    providerSettings?: Record<string, IProviderSetting>;
+    providerSettings?: Record<string, IProviderSetting>; // Assuming this is Record<ProviderName, Setting>
   }): LanguageModelV1 {
     const { model, serverEnv, apiKeys, providerSettings } = options;
 
     const { apiKey } = this.getProviderBaseUrlAndKey({
       apiKeys,
-      providerSettings: providerSettings?.[this.name],
+      providerSettings: providerSettings?.[this.name], // Get settings specific to this provider
       serverEnv: serverEnv as any,
       defaultBaseUrlKey: '',
       defaultApiTokenKey: this.config.apiTokenKey,
     });
 
     if (!apiKey) {
-      throw new Error(`Missing API key for ${this.name} provider when trying to get model instance.`);
+      // This error should ideally be caught by the calling code to inform the user
+      throw new Error(`Missing API key for ${this.name} provider. Cannot instantiate model.`);
     }
 
     const google = createGoogleGenerativeAI({
-      apiKey,
-      // You can add other configurations here like 'baseURL', 'headers' if needed by @ai-sdk/google
+      apiKey: apiKey,
+      // You can add other configurations like 'baseURL', 'headers' if needed by createGoogleGenerativeAI
     });
 
-    // The model name passed to @ai-sdk/google often needs the "models/" prefix
-    // but your internal 'name' might not have it. Adjust as necessary.
-    // The @ai-sdk/google usually handles this, but good to be aware.
-    // For example, if your `model` prop is "gemini-1.5-pro-latest", it should work.
-    // If it was "models/gemini-1.5-pro-latest", it would also work.
+    // The model name passed to `google()` should be the one expected by the SDK,
+    // typically without the 'models/' prefix, e.g., 'gemini-1.5-pro-latest'.
+    // The `name` property in `ModelInfo` should already be formatted this way.
     return google(model);
   }
 }
