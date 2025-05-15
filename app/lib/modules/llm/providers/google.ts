@@ -12,8 +12,9 @@ export default class GoogleProvider extends BaseProvider {
     apiTokenKey: 'GOOGLE_GENERATIVE_AI_API_KEY',
   };
 
+  // This list will now be the sole source of models for this provider
   staticModels: ModelInfo[] = [
-    { name: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash', provider: 'Google', maxTokenAllowed: 8192 },
+    { name: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash', provider: 'Google', maxTokenAllowed: 8192 }, // Consider updating maxTokenAllowed if known & different
     {
       name: 'gemini-2.0-flash-thinking-exp-01-21',
       label: 'Gemini 2.0 Flash-thinking-exp-01-21',
@@ -23,53 +24,38 @@ export default class GoogleProvider extends BaseProvider {
     { name: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash', provider: 'Google', maxTokenAllowed: 8192 },
     { name: 'gemini-1.5-flash-002', label: 'Gemini 1.5 Flash-002', provider: 'Google', maxTokenAllowed: 8192 },
     { name: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash-8b', provider: 'Google', maxTokenAllowed: 8192 },
-    { name: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro', provider: 'Google', maxTokenAllowed: 8192 },
-    { name: 'gemini-1.5-pro-002', label: 'Gemini 1.5 Pro-002', provider: 'Google', maxTokenAllowed: 8192 },
+    { name: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro', provider: 'Google', maxTokenAllowed: 1000000 }, // Example: updated to reflect larger context
+    { name: 'gemini-1.5-pro-002', label: 'Gemini 1.5 Pro-002', provider: 'Google', maxTokenAllowed: 1000000 }, // Example: updated
     { name: 'gemini-exp-1206', label: 'Gemini exp-1206', provider: 'Google', maxTokenAllowed: 8192 },
+    // You might want to add other known Gemini models here like:
+    // { name: 'gemini-pro', label: 'Gemini Pro', provider: 'Google', maxTokenAllowed: 32768 },
+    // { name: 'gemini-pro-vision', label: 'Gemini Pro Vision', provider: 'Google', maxTokenAllowed: 16384 },
   ];
 
+  /**
+   * Returns the static list of models. Dynamic fetching from API is removed.
+   * The parameters are kept for compatibility with the BaseProvider interface,
+   * but they are not used in this implementation.
+   */
   async getDynamicModels(
-    apiKeys?: Record<string, string>,
-    settings?: IProviderSetting,
-    serverEnv?: Record<string, string>,
+    _apiKeys?: Record<string, string>, // Marked as unused
+    _settings?: IProviderSetting,      // Marked as unused
+    _serverEnv?: Record<string, string>, // Marked as unused
   ): Promise<ModelInfo[]> {
-    const { apiKey } = this.getProviderBaseUrlAndKey({
-      apiKeys,
-      providerSettings: settings,
-      serverEnv: serverEnv as any,
-      defaultBaseUrlKey: '',
-      defaultApiTokenKey: 'GOOGLE_GENERATIVE_AI_API_KEY',
-    });
-
-    if (!apiKey) {
-      throw `Missing Api Key configuration for ${this.name} provider`;
-    }
-
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
-      headers: {
-        ['Content-Type']: 'application/json',
-      },
-    });
-
-    const res = (await response.json()) as any;
-
-    const data = res.models.filter((model: any) => model.outputTokenLimit > 8000);
-
-    return data.map((m: any) => ({
-      name: m.name.replace('models/', ''),
-      label: `${m.displayName} - context ${Math.floor((m.inputTokenLimit + m.outputTokenLimit) / 1000) + 'k'}`,
-      provider: this.name,
-      maxTokenAllowed: m.inputTokenLimit + m.outputTokenLimit || 8000,
-    }));
+    // Return the hardcoded staticModels directly
+    // The system consuming this provider will now use this list
+    // as if they were "dynamically" fetched.
+    return Promise.resolve(this.staticModels);
   }
 
+  // getModelInstance remains the same as it's needed to use the selected model
   getModelInstance(options: {
     model: string;
     serverEnv: any;
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
   }): LanguageModelV1 {
-    const { model, serverEnv, apiKeys, providerSettings } = options;
+    const { model, serverEnv, apiKeys, providerSettings }_ = options;
 
     const { apiKey } = this.getProviderBaseUrlAndKey({
       apiKeys,
@@ -80,7 +66,8 @@ export default class GoogleProvider extends BaseProvider {
     });
 
     if (!apiKey) {
-      throw new Error(`Missing API key for ${this.name} provider`);
+      // Still need an API key to use any model, even if the list is static
+      throw new Error(`Missing API key for ${this.name} provider to instantiate model: ${model}`);
     }
 
     const google = createGoogleGenerativeAI({
