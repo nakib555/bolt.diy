@@ -26,7 +26,7 @@ export default class GoogleProvider extends BaseProvider {
   // Static models serve as a fallback or for offline scenarios.
   // Keep maxTokenAllowed values realistic or consistent with dynamic fetching logic.
   staticModels: ModelInfo[] = [
-    { name: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash', provider: 'Google', maxTokenAllowed: 1048576, isPreferred: true }, // Typical context for Flash 1.5
+    { name: 'gemini-2.0-flash-thinking-exp-01-21', label: 'gemini-2.0-flash-thinking-exp-01-21', provider: 'Google', maxTokenAllowed: 1048576, isPreferred: true }, // Typical context for Flash 1.5
     { name: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro', provider: 'Google', maxTokenAllowed: 1048576, isPreferred: false },    // Typical context for Pro 1.5
     // Older models, may have smaller context windows or different naming conventions from the API
     { name: 'gemini-pro', label: 'Gemini 1.0 Pro', provider: 'Google', maxTokenAllowed: 32768, isPreferred: false },
